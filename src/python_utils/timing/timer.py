@@ -10,9 +10,13 @@ from typing import Any
 from python_utils.misc import Throttle
 
 _global_timer_manager = None
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 
-def get_global_timer_manager(throttle: float = 1.0, unit="ms", scale=1e3):
+def get_global_timer_manager(throttle: float = 1.0, unit="ms", scale=1e3, log_to_wandb=False):
     """Returns a global timer manager which can be used to time multiple events.
 
     This function is useful when you want to time multiple functions across multiple files.
@@ -52,7 +56,7 @@ def get_global_timer_manager(throttle: float = 1.0, unit="ms", scale=1e3):
     """
     global _global_timer_manager
     if _global_timer_manager is None:
-        _global_timer_manager = TimerManager(throttle, unit, scale)
+        _global_timer_manager = TimerManager(throttle, unit, scale, log_to_wandb)
     return _global_timer_manager
 
 
@@ -118,7 +122,7 @@ class TimerManager:
         # function2: 0.0000 ms - Avg: 0.0000 ms - FPS: 0.0000
     """
 
-    def __init__(self, throttle: float = 1.0, unit="s", scale=1.0):
+    def __init__(self, throttle: float = 1.0, unit="s", scale=1.0, log_to_wandb=False):
         self._timers: dict[str, Timer] = {}
         self._throttles = {}
         self._interval = throttle
@@ -127,7 +131,8 @@ class TimerManager:
         self._scale = scale
 
         self._call_stack = []
-
+        self._log_to_wandb = log_to_wandb
+        
     def start(self, name: str):
         """Start an internal timer with the given name. If the timer does not exist, it will be created."""
         if name not in self._timers:
@@ -170,6 +175,8 @@ class TimerManager:
         self._timers[name].stop()
 
         self._throttles[name].rate_limit(lambda ind=indent: self._timers[name].print(ind))
+        if self._log_to_wandb and wandb is not None and wandb.run is not None:
+            wandb.log({f"timings/{name}": self._timers[name]._elapsed_time}, commit=False)
 
     def __call__(self, name: str, throttle: float = None, unit=None, scale=None):
         """Start a timer with the given name and return this `TimerManager` instance.
